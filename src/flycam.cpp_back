@@ -1,0 +1,401 @@
+#include "flycam.h"
+#define SOFTWARE_TRIGGER_CAMERA
+
+MyCamera::MyCamera()
+{
+
+}
+
+
+bool MyCamera::ConnectToCamera(unsigned int camFlag)
+{
+		BusManager busMgr;
+		unsigned int numCameras;
+		m_Error = busMgr.GetNumOfCameras(&numCameras);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		if (numCameras < 1)
+		{
+			printf("Insufficient number of cameras... exiting\n");
+			return -1;
+		}
+		// Connect to a camera
+		PGRGuid guid;
+		m_Error = busMgr.GetCameraFromIndex(camFlag, &guid);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		m_Error = m_Cam.Connect(&guid);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+
+		//check the permission of current directory
+		/*FILE* tempFile = fopen("test.txt", "w+");
+		if (tempFile == NULL)
+		{
+			printf("Failed to create file in current folder.  Please check permissions.\n");
+			return -1;
+		}
+		fclose(tempFile);
+		remove("test.txt");*/
+
+		// Get the camera information
+		CameraInfo camInfo;
+		m_Error = m_Cam.GetCameraInfo(&camInfo);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		PrintCameraInfo(&camInfo);
+
+#ifndef SOFTWARE_TRIGGER_CAMERA
+    // Check for external trigger support
+	  	TriggerModeInfo triggerModeInfo;
+	 	m_Error = m_Cam.GetTriggerModeInfo(&triggerModeInfo);
+	  	if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		if (triggerModeInfo.present != true)
+		{
+			printf("Camera does not support external trigger! Exiting...\n");
+			return -1;
+		}
+#endif
+
+		// Get current trigger settings
+        	//TriggerMode triggerMode;
+		m_Error = m_Cam.GetTriggerMode(&m_TriggerMode);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+
+		// Set camera to trigger mode 0
+		m_TriggerMode.onOff = true;
+		m_TriggerMode.mode = 0;
+		m_TriggerMode.parameter = 0;
+
+#ifdef SOFTWARE_TRIGGER_CAMERA
+    	// A source of 7 means software trigger
+    	m_TriggerMode.source = 7;
+#else
+    	// Triggering the camera externally using source 0.
+	m_TriggerMode.source = 0;
+	// m_TriggerMode.polarity = 1; // Specifies the trigger signal polarity as an active high (rising edge) signal
+#endif
+
+        	m_Error = m_Cam.SetTriggerMode(&m_TriggerMode);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+
+      // Poll to ensure camera is ready
+      /* bool retVal = PollForTriggerReady( &m_Cam );
+       if( !retVal )
+      {
+        cout << endl;
+        cout << "Error polling for trigger ready!" << endl;
+        return -1;
+      }*/
+
+
+		// Get the camera configuration
+		FC2Config config;
+		m_Error = m_Cam.GetConfiguration(&config);
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+        	// Set the grab timeout to 5 seconds
+         	config.grabTimeout = 500;
+
+
+		// Camera is ready, start capturing images
+		////////////////初始化相机参数/////////////////////////
+    
+    //camera parameters
+
+    Format7ImageSettings f7setting;
+    //size setting
+    unsigned int packaage_size;
+    float persentage;
+    m_Cam.GetFormat7Configuration(&f7setting, &packaage_size, &persentage);
+
+    f7setting.mode = Mode(MODE_0);
+    f7setting.offsetX = 1000;
+    f7setting.offsetY = 1000;
+    f7setting.width = 100;
+    f7setting.height = 100;
+
+    f7setting.pixelFormat = PIXEL_FORMAT_RAW8;
+
+
+    //packaage_size = 4092;
+    m_Cam.SetFormat7Configuration(&f7setting, packaage_size);
+
+/*    Property exposure;
+    exposure.type = AUTO_EXPOSURE;
+    exposure.absControl = true;
+    exposure.onePush = false;
+    exposure.onOff = true;
+    exposure.autoManualMode = false;
+    exposure.absValue = 1.2;
+    m_Error = m_Cam.SetProperty(&exposure);
+    //shutter setting
+
+    Property pshutter;
+    pshutter.type = GAMMA;
+    pshutter.absControl = true;
+    pshutter.onePush = false;
+    pshutter.onOff = true;
+    pshutter.autoManualMode = false;
+    pshutter.absValue = 10;
+    m_Error = m_Cam.SetProperty(&pshutter);
+
+    Property pgain;
+    pgain.type = GAIN;
+    pgain.absControl = true;
+    pgain.onePush = false;
+    pgain.onOff = true;
+    pgain.autoManualMode = false;
+    pgain.absValue = 0;
+    m_Error = m_Cam.SetProperty(&pgain);
+    //gain setting*/
+
+    bool returnstatus;
+    Format7PacketInfo info;
+    m_Error = m_Cam.ValidateFormat7Settings(&f7setting, &returnstatus, &info);
+    if (m_Error != FlyCapture2::PGRERROR_OK)
+    {
+        //cout<<"ValidateFormat7Settings"<<endl;
+        printf("ValidateFormat7Settings:\n");
+        m_Error.PrintErrorTrace();
+    }
+
+/*    Property pFR;
+    pFR.type = FRAME_RATE;
+    pFR.absControl = true;
+    pFR.onePush = false;
+    pFR.onOff = true;
+    pFR.autoManualMode = false;
+    pFR.absValue = 30;
+    m_Error = m_Cam.SetProperty(&pFR);
+    //frame rate setting
+
+    Property pWB;
+    pWB.type = WHITE_BALANCE;
+    pWB.absControl = true;
+    pWB.onePush = false;
+    pWB.onOff = true;
+    pWB.autoManualMode = true;
+    pWB.valueA = 578;
+    pWB.valueB = 803;
+    m_Error = m_Cam.SetProperty(&pWB);
+    m_Cam.GetProperty(&pWB);*/
+
+
+    //相机开始拍摄
+    m_Error = m_Cam.StartCapture();
+
+    if (m_Error != PGRERROR_OK)
+    {
+        PrintError(m_Error);
+        return -1;
+    }
+
+    return true;
+
+
+		/*//关闭相机自动曝光
+		Property prop; //Declare a Property struct.
+		prop.type = SHUTTER; //Define the property to adjust.
+		prop.onOff = true; //Ensure the property is on.
+		prop.autoManualMode = false; //Ensure auto-adjust mode is off.
+		prop.absControl = true; //Ensure the property is set up to use absolute value control.
+		prop.absValue = 3; //Set the absolute value.
+		m_Error = m_Cam.SetProperty(&prop); //Set the property.
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		//关掉自动增益模式
+		prop.type = GAIN; //Define the property to adjust.
+		prop.onOff = true; //Ensure the property is on.
+		prop.autoManualMode = false; //Ensure auto-adjust mode is off.
+		m_Error = m_Cam.SetProperty(&prop); //Set the property.
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		prop.type = BRIGHTNESS; //Define the property to adjust.
+		prop.onOff = true; //Ensure the property is on.
+		prop.autoManualMode = false; //Ensure auto-adjust mode is off.
+		m_Error = m_Cam.SetProperty(&prop); //Set the property.
+		if (m_Error != PGRERROR_OK)
+		{
+			PrintError(m_Error);
+			return -1;
+		}
+		*/
+
+}
+
+bool MyCamera::DisconnectCamera()
+{
+    printf( "\nStopping grabbing images...\n" );
+
+    // Turn trigger mode off.
+    m_TriggerMode.onOff = false;
+    m_Error = m_Cam.SetTriggerMode( &m_TriggerMode );
+    if (m_Error != PGRERROR_OK)
+    {
+        PrintError( m_Error );
+        return -1;
+    }
+
+    // Stop capturing images
+    m_Error = m_Cam.StopCapture();
+    if (m_Error != PGRERROR_OK)
+    {
+        PrintError( m_Error );
+        return -1;
+    }
+
+    // Disconnect the camera
+    m_Error = m_Cam.Disconnect();
+    if (m_Error != PGRERROR_OK)
+    {
+        PrintError( m_Error );
+        return -1;
+    }
+
+    return 1;
+}
+
+
+void MyCamera::PrintError( Error error )
+{
+    error.PrintErrorTrace();
+}
+
+void MyCamera::PrintCameraInfo( CameraInfo* myCamInfo )
+{
+    printf(
+        "\n*** CAMERA INFORMATION ***\n"
+        "Serial number - %u\n"
+        "Camera model - %s\n"
+        "Camera vendor - %s\n"
+        "Sensor - %s\n"
+        "Resolution - %s\n"
+        "Firmware version - %s\n"
+        "Firmware build time - %s\n\n",
+        myCamInfo->serialNumber,
+        myCamInfo->modelName,
+        myCamInfo->vendorName,
+        myCamInfo->sensorInfo,
+        myCamInfo->sensorResolution,
+        myCamInfo->firmwareVersion,
+        myCamInfo->firmwareBuildTime );
+}
+
+bool MyCamera::FireSoftwareTrigger( Camera* myCam )
+{
+    const unsigned int k_softwareTrigger = 0x62C;
+    const unsigned int k_fireVal = 0x80000000;
+    Error m_Error;
+
+    m_Error = myCam->WriteRegister( k_softwareTrigger, k_fireVal );
+    if (m_Error != PGRERROR_OK)
+    {
+        PrintError( m_Error );
+        return false;
+    }
+
+    return true;
+}
+
+
+/*bool MyCamera::PollForTriggerReady( Camera* myCam)
+{
+    const unsigned int k_softwareTrigger = 0x62C;
+    Error m_Error;
+    unsigned int regVal = 0;
+
+    do
+    {
+        m_Error = myCam->ReadRegister( k_softwareTrigger, &regVal );
+        if (m_Error != PGRERROR_OK)
+        {
+            PrintError( m_Error);
+            return false;
+        }
+
+    } while ( (regVal >> 31) != 0 );
+
+    return true;
+}*/
+
+void MyCamera::GrabAPicture(Image& myImage)
+{
+
+    //PollForTriggerReady( &m_Cam);
+    //cout << "Press the Enter key to initiate a software trigger" << endl;
+    //cin.ignore();
+
+#ifdef SOFTWARE_TRIGGER_CAMERA
+
+    // Fire software trigger
+    bool retVal = FireSoftwareTrigger( &m_Cam );
+    if ( !retVal )
+    {
+        printf("\nError firing software trigger!\n");
+        return ;
+    }
+#endif
+
+    // Retrieve an image
+    Image rawImage;
+    m_Error = m_Cam.RetrieveBuffer( &rawImage );
+    if (m_Error != PGRERROR_OK)
+    {
+        PrintError( m_Error );
+        return ;
+    }
+    rawImage.Convert( FlyCapture2::PIXEL_FORMAT_BGR, &myImage);
+    return ;
+}
+
+/*bool MyCamera::SetExposureTime(float ms)
+{
+	// Setting shutter exposure time
+	Property prop; //Declare a Property struct.
+	prop.type = SHUTTER; //Define the property to adjust.
+	prop.onOff = true; //Ensure the property is on.
+	prop.autoManualMode = false; //Ensure auto-adjust mode is off.
+	prop.absControl = true; //Ensure the property is set up to use absolute value control.
+	prop.absValue = ms; //Set the absolute value.
+	m_Error = m_Cam.SetProperty(&prop); //Set the property.
+	if (m_Error != PGRERROR_OK)
+	{
+		PrintError(m_Error);
+		return -1;
+	}
+	return 1;
+}*/
